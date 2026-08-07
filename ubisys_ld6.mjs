@@ -152,36 +152,40 @@ const definition = {
             };
         }),
         m.deviceAddCustomCluster('manuSpecificUbisysDeviceSetup', {
+            name: 'manuSpecificUbisysDeviceSetup',
             ID: 0xfc00,
             attributes: {
-                inputConfigurations: { ID: 0x0000, type: Zcl.DataType.ARRAY, write: true },
-                inputActions: { ID: 0x0001, type: Zcl.DataType.ARRAY, write: true },
-                outputConfigurations: { ID: 0x0010, type: Zcl.DataType.ARRAY, write: true },
+                inputConfigurations: { name: 'inputConfigurations', ID: 0x0000, type: Zcl.DataType.ARRAY, write: true },
+                inputActions: { name: 'inputActions', ID: 0x0001, type: Zcl.DataType.ARRAY, write: true },
+                outputConfigurations: { name: 'outputConfigurations', ID: 0x0010, type: Zcl.DataType.ARRAY, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('lightingBallastCfg', {
+            name: 'lightingBallastCfg',
             ID: Zcl.Clusters.lightingBallastCfg.ID,
             attributes: {
-                physicalMinLevel: { ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
-                physicalMaxLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
+                physicalMinLevel: { name: 'physicalMinLevel', ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
+                physicalMaxLevel: { name: 'physicalMaxLevel', ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('lightingColorCtrl', {
+            name: 'lightingColorCtrl',
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
-                advancedOptions: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('genLevelCtrl', {
+            name: 'genLevelCtrl',
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
-                minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
-                options: { ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
-                onOffTransitionTime: { ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
-                startUpCurrentLevel: { ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
+                minimumOnLevel: { name: 'minimumOnLevel', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                options: { name: 'options', ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
+                onOffTransitionTime: { name: 'onOffTransitionTime', ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
+                startUpCurrentLevel: { name: 'startUpCurrentLevel', ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
