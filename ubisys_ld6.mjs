@@ -165,8 +165,8 @@ const definition = {
             name: 'lightingBallastCfg',
             ID: Zcl.Clusters.lightingBallastCfg.ID,
             attributes: {
-                physicalMinLevel: { name: 'physicalMinLevel', ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
-                physicalMaxLevel: { name: 'physicalMaxLevel', ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
+                minLevel: { name: 'minLevel', ID: 0x0010, type: Zcl.DataType.UINT8, write: true },
+                maxLevel: { name: 'maxLevel', ID: 0x0011, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
@@ -174,7 +174,7 @@ const definition = {
             name: 'lightingColorCtrl',
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
-                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.DATA8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
@@ -182,7 +182,7 @@ const definition = {
             name: 'genLevelCtrl',
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
-                minimumOnLevel: { name: 'minimumOnLevel', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                minimumOnLevel: { name: 'minimumOnLevel', ID: 0x0000, type: Zcl.DataType.UINT8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
                 options: { name: 'options', ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
                 onOffTransitionTime: { name: 'onOffTransitionTime', ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
                 startUpCurrentLevel: { name: 'startUpCurrentLevel', ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
@@ -235,8 +235,8 @@ const definition = {
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
-                        if (msg.data.physicalMinLevel !== undefined) result.ballast_min_level = msg.data.physicalMinLevel;
-                        if (msg.data.physicalMaxLevel !== undefined) result.ballast_max_level = msg.data.physicalMaxLevel;
+                        if (msg.data.minLevel !== undefined) result.ballast_min_level = msg.data.minLevel;
+                        if (msg.data.maxLevel !== undefined) result.ballast_max_level = msg.data.maxLevel;
                         return result;
                     },
                 },
@@ -336,17 +336,17 @@ const definition = {
                     key: ['ballast_min_level', 'ballast_max_level'],
                     convertSet: async (entity, key, value, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.write('lightingBallastCfg', { physicalMinLevel: value });
+                            await entity.write('lightingBallastCfg', { minLevel: value });
                         } else if (key === 'ballast_max_level') {
-                            await entity.write('lightingBallastCfg', { physicalMaxLevel: value });
+                            await entity.write('lightingBallastCfg', { maxLevel: value });
                         }
                         return { state: { [key]: value } };
                     },
                     convertGet: async (entity, key, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.read('lightingBallastCfg', ['physicalMinLevel']);
+                            await entity.read('lightingBallastCfg', ['minLevel']);
                         } else if (key === 'ballast_max_level') {
-                            await entity.read('lightingBallastCfg', ['physicalMaxLevel']);
+                            await entity.read('lightingBallastCfg', ['maxLevel']);
                         }
                     },
                 },
@@ -559,7 +559,7 @@ const definition = {
                         await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
                     }
                     if (ep.supportsInputCluster('lightingBallastCfg')) {
-                        await ep.read('lightingBallastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
+                        await ep.read('lightingBallastCfg', ['minLevel', 'maxLevel']);
                     }
                     await ep.read('genLevelCtrl', ['startUpCurrentLevel', 'options']);
                 } catch (e) { console.warn(`ubisys LD6: Failed to configure endpoint ${epNum}: ${e.message}`); }
