@@ -449,10 +449,12 @@ const definition = {
                     const ep = device.getEndpoint(epNum);
                     if (ep) {
                         const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
-                        let colorCapabilities;
+                        let colorCapabilities, physMinMireds, physMaxMireds;
                         try {
                             if (ep.supportsInputCluster('lightingColorCtrl')) {
                                 colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
+                                physMinMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMinMireds');
+                                physMaxMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMaxMireds');
                             }
                         } catch (e) { /* ignore */ }
 
@@ -493,8 +495,14 @@ const definition = {
 
                         // 3. Expose provisions
                         if (hasColorTemp) {
+                            // Prefer the range the device itself reports: the Versalight engine
+                            // widens it beyond the physical whites (RGB-assisted CT) and narrows
+                            // it when AdvancedOptions bit #0 is set. Fall back to the range
+                            // derived from the configured white primaries.
                             let range = [153, 500]; // Default CCT range
-                            if (cwMireds && wwMireds) {
+                            if (physMinMireds && physMaxMireds) {
+                                range = [physMinMireds, physMaxMireds];
+                            } else if (cwMireds && wwMireds) {
                                 range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
                             }
 
