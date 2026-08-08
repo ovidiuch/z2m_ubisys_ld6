@@ -162,15 +162,6 @@ const definition = {
             },
             commands: {}, commandsResponse: {},
         }),
-        m.deviceAddCustomCluster('lightingBallastCfg', {
-            name: 'lightingBallastCfg',
-            ID: Zcl.Clusters.lightingBallastCfg.ID,
-            attributes: {
-                minLevel: { name: 'minLevel', ID: 0x0010, type: Zcl.DataType.UINT8, write: true },
-                maxLevel: { name: 'maxLevel', ID: 0x0011, type: Zcl.DataType.UINT8, write: true },
-            },
-            commands: {}, commandsResponse: {},
-        }),
         m.deviceAddCustomCluster('lightingColorCtrl', {
             name: 'lightingColorCtrl',
             ID: Zcl.Clusters.lightingColorCtrl.ID,
@@ -183,10 +174,10 @@ const definition = {
             name: 'genLevelCtrl',
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
+                // options, onOffTransitionTime and startUpCurrentLevel are already part of
+                // the standard genLevelCtrl definition; only the manufacturer-specific
+                // MinimumOnLevel needs to be added here
                 minimumOnLevel: { name: 'minimumOnLevel', ID: 0x0000, type: Zcl.DataType.UINT8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
-                options: { name: 'options', ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
-                onOffTransitionTime: { name: 'onOffTransitionTime', ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
-                startUpCurrentLevel: { name: 'startUpCurrentLevel', ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
