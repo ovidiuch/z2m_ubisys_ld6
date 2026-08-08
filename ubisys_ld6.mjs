@@ -41,8 +41,9 @@ const fzOutputConfiguration = {
     type: ['attributeReport', 'readResponse'],
     convert: (model, msg, publish, options, meta) => {
         if (msg.data.outputConfigurations) {
-            const elements = msg.data.outputConfigurations.map(buf => [buf.length, ...buf]);
-            const raw = Buffer.from([0x48, 0x41, 0x06, 0x00, ...elements.flat()]).toString('hex');
+            const configs = msg.data.outputConfigurations;
+            const elements = configs.map(buf => [buf.length, ...buf]);
+            const raw = Buffer.from([0x48, 0x41, configs.length & 0xFF, (configs.length >> 8) & 0xFF, ...elements.flat()]).toString('hex');
             return { output_configuration_raw: raw };
         }
     },
@@ -367,8 +368,16 @@ const definition = {
                             throw new Error('Calibration must be a JSON object');
                         }
 
-                        if (cal.channel === undefined || cal.channel < 1 || cal.channel > 6) {
-                            throw new Error('Calibration must specify a "channel" between 1 and 6');
+                        if (!Number.isInteger(cal.channel) || cal.channel < 1 || cal.channel > 6) {
+                            throw new Error('Calibration must specify an integer "channel" between 1 and 6');
+                        }
+                        if (cal.flux !== undefined && (!Number.isInteger(cal.flux) || cal.flux < 0 || cal.flux > 254)) {
+                            throw new Error('Calibration "flux" must be an integer between 0 and 254');
+                        }
+                        for (const coord of ['x', 'y']) {
+                            if (cal[coord] !== undefined && (typeof cal[coord] !== 'number' || cal[coord] < 0 || cal[coord] > 1)) {
+                                throw new Error(`Calibration "${coord}" must be a number between 0 and 1`);
+                            }
                         }
 
                         const setupEp = getSetupEndpoint(meta.device);
@@ -382,13 +391,15 @@ const definition = {
                             const el = Buffer.from(buf);
                             if (i === (cal.channel - 1)) {
                                 if (cal.flux !== undefined) el[1] = cal.flux;
+                                // CIE 1931 coordinates are value * 65536, little-endian,
+                                // valid range 0..65279 (0xFFFF denotes invalid/unknown)
                                 if (cal.x !== undefined) {
-                                    const x = Math.round(cal.x * 65536);
+                                    const x = Math.min(65279, Math.round(cal.x * 65536));
                                     el[2] = x & 0xFF;
                                     el[3] = (x >> 8) & 0xFF;
                                 }
                                 if (cal.y !== undefined) {
-                                    const y = Math.round(cal.y * 65536);
+                                    const y = Math.min(65279, Math.round(cal.y * 65536));
                                     el[4] = y & 0xFF;
                                     el[5] = (y >> 8) & 0xFF;
                                 }
