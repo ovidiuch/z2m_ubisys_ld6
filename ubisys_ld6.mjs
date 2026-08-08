@@ -174,7 +174,7 @@ const definition = {
             name: 'lightingColorCtrl',
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
-                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.DATA8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
