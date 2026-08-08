@@ -97,14 +97,14 @@ function getSetupEndpoint(device) {
  * Writes a structured attribute to the manufacturer-specific setup cluster.
  * @param {Device} device - zigbee-herdsman device
  * @param {number} attrId - Attribute ID (e.g., 0x0010 for outputConfigurations)
- * @param {Array} elements - Array of Buffers
- * @param {number} dataType - Zcl.DataType (default: ARRAY)
+ * @param {Array} elements - Array elements (Buffers for OCTET_STR, numbers for DATA8)
+ * @param {number} elementType - Zcl.DataType of the array elements (default: OCTET_STR)
  */
-async function writeSetupAttribute(device, attrId, elements, dataType = Zcl.DataType.ARRAY) {
+async function writeSetupAttribute(device, attrId, elements, elementType = Zcl.DataType.OCTET_STR) {
     const endpoint = getSetupEndpoint(device);
     await endpoint.writeStructured('manuSpecificUbisysDeviceSetup', [{
-        attrId, selector: {}, dataType,
-        elementData: { elementType: Zcl.DataType.OCTET_STR, elements }
+        attrId, selector: {}, dataType: Zcl.DataType.ARRAY,
+        elementData: { elementType, elements }
     }]);
 }
 
@@ -197,7 +197,8 @@ const definition = {
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
-                        if (msg.data.inputConfigurations !== undefined) result.input_configurations = msg.data.inputConfigurations.map(b => b[0]);
+                        // InputConfigurations elements are 8-bit data (0x08); herdsman parses them as plain numbers
+                        if (msg.data.inputConfigurations !== undefined) result.input_configurations = msg.data.inputConfigurations;
                         if (msg.data.inputActions !== undefined) result.input_actions = msg.data.inputActions.map(b => b.toString('hex'));
                         return result;
                     },
@@ -265,8 +266,11 @@ const definition = {
                 {
                     key: ['input_configurations'],
                     convertSet: async (entity, key, value, meta) => {
-                        const data = value.map(val => Buffer.from([val]));
-                        await writeSetupAttribute(meta.device, 0x0000, data);
+                        // InputConfigurations is an array of 8-bit data (0x08), one byte per physical input
+                        if (!Array.isArray(value) || value.some(v => !Number.isInteger(v) || v < 0 || v > 0xff)) {
+                            throw new Error('input_configurations must be an array of bytes (0-255), e.g. [0, 0, 0]');
+                        }
+                        await writeSetupAttribute(meta.device, 0x0000, value, Zcl.DataType.DATA8);
                         return { state: { input_configurations: value } };
                     },
                     convertGet: async (entity, key, meta) => {
