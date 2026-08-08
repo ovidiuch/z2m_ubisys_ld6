@@ -213,8 +213,6 @@ const definition = {
                                 advanced_options_no_color_white: (val & 0x01) > 0,
                                 advanced_options_no_first_white_color: (val & 0x02) > 0,
                                 advanced_options_no_second_white_color: (val & 0x04) > 0,
-                                advanced_options_ignore_color_temp_range: (val & 0x08) > 0,
-                                advanced_options_constant_luminous_flux: (val & 0x10) > 0,
                             };
                         }
                     },
@@ -291,16 +289,14 @@ const definition = {
                 {
                     key: [
                         'advanced_options_no_color_white', 'advanced_options_no_first_white_color', 'advanced_options_no_second_white_color',
-                        'advanced_options_ignore_color_temp_range', 'advanced_options_constant_luminous_flux'
                     ],
                     convertSet: async (entity, key, value, meta) => {
-                        // Handle the 1-byte bitmask attribute for advanced features
+                        // Handle the 1-byte bitmask attribute for advanced features.
+                        // Bits #3..#7 are reserved (manual 6.4.8.1) and must be written as 0.
                         const bitMapping = [
                             'advanced_options_no_color_white',
                             'advanced_options_no_first_white_color',
                             'advanced_options_no_second_white_color',
-                            'advanced_options_ignore_color_temp_range',
-                            'advanced_options_constant_luminous_flux'
                         ];
                         const val = resolveAdvancedOptions(meta.state, key, value, bitMapping);
                         await entity.write('lightingColorCtrl', { advancedOptions: val }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
@@ -428,8 +424,6 @@ const definition = {
             exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
             exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
             exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_ignore_color_temp_range', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_constant_luminous_flux', ea.ALL, true, false));
             exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
