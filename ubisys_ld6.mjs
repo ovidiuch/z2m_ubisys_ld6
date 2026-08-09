@@ -411,9 +411,12 @@ const definition = {
             exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
             // on_off_transition_time moved to per-endpoint loop
-            exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false)
+                .withDescription('Compose CT-mode white only from the white channels; narrows the CT range to the calibrated whites. The firmware applies this fully only at boot: power-cycle the device after changing, then restart Z2M (see README).'));
+            exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false)
+                .withDescription('Exclude the first (cool) white from color rendering. Power-cycle the device after changing.'));
+            exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false)
+                .withDescription('Exclude the second (warm) white from color rendering. Power-cycle the device after changing.'));
             exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));

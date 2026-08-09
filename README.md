@@ -137,10 +137,10 @@ Input configuration values:
 
 The LD6 allows fine-tuning of how color and white primaries are mixed. These are exposed as binary switches:
 
-- **Don't use color for white**: White tones in CCT mode will only be composed of white LEDs (requires 2 white primaries).
-- **Don't use first/second white for color**: Prevents specific white LEDs from contributing to colored light ( CIE 1931 xy or hue/saturation mode).
-- **Constant Luminous Flux**: Maintains constant brightness when shifting color temperature.
-- **Ignore Color Temperature Range**: Allows setting any color temperature even if it falls outside the calibrated physical range.
+- **Don't use color for white**: White tones in CCT mode will only be composed of white LEDs (requires 2 white primaries). This also narrows the color temperature range the device reports and clamps to (e.g. from 133–556 mireds down to the interval between the calibrated whites).
+- **Don't use first/second white for color**: Prevents specific white LEDs from contributing to colored light (CIE 1931 xy or hue/saturation mode).
+
+> **Warning — power-cycle after changing these.** The firmware applies `AdvancedOptions` changes non-atomically: command validation, rendering and the reported color temperature range are recomputed independently, and a runtime write can leave them inconsistent (e.g. the light renders 3000K while the `colorTemperature` attribute reports 1800K). Only a reboot guarantees a consistent state. Leave the device unpowered for 15–30 seconds (PSU capacitors can carry it through short cycles — watch for the device announce in the Z2M log), then restart Zigbee2MQTT so the exposed color temperature range is recalculated.
 
 ## Dimming Limits (`Ballast Configuration`)
 
