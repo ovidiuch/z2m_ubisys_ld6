@@ -574,6 +574,24 @@ const definition = {
             }
         }
     },
+    onEvent: async (type, data, device) => {
+        // The LD6 recomputes colorTempPhysicalMin/Max (and its effective CT
+        // clamping) only at boot, from the active mixing mode and the white
+        // calibration. Refresh the cached values on every device announce so
+        // the next exposes recalculation (Z2M restart) picks up the current
+        // range.
+        if (type === 'deviceAnnounce') {
+            for (const ep of device.endpoints) {
+                if (ep.supportsInputCluster('lightingColorCtrl')) {
+                    try {
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTempPhysicalMin', 'colorTempPhysicalMax']);
+                    } catch (e) {
+                        // Device may still be waking up; configure or the next announce will retry.
+                    }
+                }
+            }
+        }
+    },
     ota: true,
 };
 
