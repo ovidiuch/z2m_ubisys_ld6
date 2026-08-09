@@ -453,8 +453,8 @@ const definition = {
                         try {
                             if (ep.supportsInputCluster('lightingColorCtrl')) {
                                 colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
-                                physMinMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMinMireds');
-                                physMaxMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMaxMireds');
+                                physMinMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMin');
+                                physMaxMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMax');
                             }
                         } catch (e) { /* ignore */ }
 
@@ -564,7 +564,7 @@ const definition = {
 
                     // Check color capabilities if cluster exists
                     if (ep.supportsInputCluster('lightingColorCtrl')) {
-                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMin', 'colorTempPhysicalMax']);
                     }
                     if (ep.supportsInputCluster('lightingBallastCfg')) {
                         await ep.read('lightingBallastCfg', ['minLevel', 'maxLevel']);
