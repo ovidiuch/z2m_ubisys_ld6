@@ -109,23 +109,6 @@ async function writeSetupAttribute(device, attrId, elements, elementType = Zcl.D
     }]);
 }
 
-/**
- * Resolves a bitfield value for advanced options based on the current state.
- * @param {Object} state - Current device state
- * @param {string} key - The key being set
- * @param {boolean} value - New value for the key
- * @param {Array} bitMapping - List of keys mapping to bits 0, 1, 2...
- * @returns {number} The combined bitmask
- */
-function resolveAdvancedOptions(state, key, value, bitMapping) {
-    let mask = 0;
-    bitMapping.forEach((mappedKey, index) => {
-        const val = (key === mappedKey) ? value : (state[mappedKey] || false);
-        if (val) mask |= (1 << index);
-    });
-    return mask;
-}
-
 const definition = {
     zigbeeModel: ['LD6'],
     model: 'LD6',
@@ -283,16 +266,21 @@ const definition = {
                         'advanced_options_no_color_white', 'advanced_options_no_first_white_color', 'advanced_options_no_second_white_color',
                     ],
                     convertSet: async (entity, key, value, meta) => {
-                        // Handle the 1-byte bitmask attribute for advanced features.
-                        // Bits #3..#7 are reserved (manual 6.4.8.1) and must be written as 0.
+                        // Read-modify-write on the device value: Z2M's cached state can be
+                        // stale for the other bits (changed via Dev console or the ubisys
+                        // app). Bits #3..#7 are reserved (manual 6.4.8.1) and must be
+                        // written as 0, so the result is masked to the three defined bits.
                         const bitMapping = [
                             'advanced_options_no_color_white',
                             'advanced_options_no_first_white_color',
                             'advanced_options_no_second_white_color',
                         ];
-                        const val = resolveAdvancedOptions(meta.state, key, value, bitMapping);
+                        const resp = await entity.read('lightingColorCtrl', ['advancedOptions'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
+                        const current = (resp && resp.advancedOptions) || 0;
+                        const bit = 1 << bitMapping.indexOf(key);
+                        const val = (value ? current | bit : current & ~bit) & 0x07;
                         await entity.write('lightingColorCtrl', { advancedOptions: val }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
-                        return { state: { [key]: value } };
+                        return { state: Object.fromEntries(bitMapping.map((k, i) => [k, (val & (1 << i)) > 0])) };
                     },
                     convertGet: async (entity, key, meta) => {
                         await entity.read('lightingColorCtrl', ['advancedOptions'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
