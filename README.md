@@ -173,31 +173,31 @@ Instead of manually building hex strings for `output_configuration`, use the `ca
 
 ```json
 {
-  "channel": 1,
-  "x": 0.3127,
-  "y": 0.3290,
+  "channel": 5,
+  "x": 0.4366,
+  "y": 0.4042,
   "flux": 254
 }
 ```
 
 - **`channel`**: 1 to 6 (physical PWM outputs).
 - **`x` / `y`**: CIE 1931 chromaticity coordinates (0.0 to 1.0).
+- **`cct`**: alternative to `x`/`y` — a color temperature in Kelvin (1667-25000); the converter computes the Planckian locus coordinates for you. `{"channel": 5, "cct": 3000}` is equivalent to the payload above.
 - **`flux`**: Relative luminous flux (0 to 254).
 
-### Fixing CCT Range Mismatch
+### Calibrating the whites and the CCT range
 
-If your CCT slider goes from 153 to 555 Mireds (6500K-1800K) but your light stops changing color at 370 Mireds (2700K), it means the device is configured for a wider range than your physical LED strips support.
+The device recomputes its reported color temperature range **at boot**, from the active mixing mode and the calibrated whites:
 
-To fix this, use the **calibration** helper to tell the LD6 the exact color specifications of your strips.
+- With RGB mixing active (default, `advanced_options_no_color_white` off) the range stays wide (measured 133-556 mireds, ~7500K-1800K): color temperatures beyond the physical whites are composed with the RGB channels. This is by design, not a mismatch.
+- With **Don't use color for white** enabled (plus a device power-cycle, see the warning above), the range narrows to the interval between the calibrated whites.
 
-**Example for a standard 2700K (Warm) + 6500K (Cool) strip:**
+If your strip's whites differ from the 2700K/6500K defaults, calibrate them — otherwise the engine compensates the difference with RGB and white tones drift. Example for a 3000K/6000K strip in `1x_rgbww` mode (cool white on channel 4, warm white on channel 5):
 
-1.  **Set Cool Channel (e.g. Channel 1) to 6500K:**
-    `{"channel": 1, "x": 0.3127, "y": 0.3290}`
-2.  **Set Warm Channel (e.g. Channel 2) to 2700K:**
-    `{"channel": 2, "x": 0.4578, "y": 0.4101}`
+1.  `{"channel": 4, "cct": 6000}`
+2.  `{"channel": 5, "cct": 3000}`
 
-After applying these, **Re-Interview** the device. The reported `color_temp` range will automatically adjust to 153-370 Mireds.
+The exposed range in Z2M/HA is recalculated from the device-reported attributes on the next Zigbee2MQTT restart.
 
 ## Advanced: Raw Output Configuration
 

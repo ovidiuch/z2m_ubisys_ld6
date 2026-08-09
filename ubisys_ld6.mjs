@@ -84,6 +84,32 @@ function xyToMireds(x, y) {
 }
 
 /**
+ * Approximates the Planckian locus point for a color temperature (Kim et al.
+ * cubic spline approximation, CIE 1931; valid for 1667K-25000K). Reproduces
+ * the ubisys built-in white reference points to within ~1e-3.
+ * @param {number} kelvin - Color temperature in Kelvin
+ * @returns {{x: number, y: number}} CIE 1931 chromaticity coordinates
+ */
+function cctToXy(kelvin) {
+    const T = kelvin;
+    let x;
+    if (T <= 4000) {
+        x = -0.2661239e9 / T ** 3 - 0.2343589e6 / T ** 2 + 0.8776956e3 / T + 0.179910;
+    } else {
+        x = -3.0258469e9 / T ** 3 + 2.1070379e6 / T ** 2 + 0.2226347e3 / T + 0.240390;
+    }
+    let y;
+    if (T <= 2222) {
+        y = -1.1063814 * x ** 3 - 1.34811020 * x ** 2 + 2.18555832 * x - 0.20219683;
+    } else if (T <= 4000) {
+        y = -0.9549476 * x ** 3 - 1.37418593 * x ** 2 + 2.09137015 * x - 0.16748867;
+    } else {
+        y = 3.0817580 * x ** 3 - 5.87338670 * x ** 2 + 3.75112997 * x - 0.37001483;
+    }
+    return { x, y };
+}
+
+/**
  * Safely retrieves the ubisys device setup endpoint (232).
  * @param {Device} device - zigbee-herdsman device object
  * @returns {Endpoint} The setup endpoint or throws if not found.
@@ -340,7 +366,7 @@ const definition = {
                             }
                             cal = typeof value === 'string' ? JSON.parse(value) : value;
                         } catch (err) {
-                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254}`);
+                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254} or {"channel": 1..6, "cct": 1667..25000, "flux": 0..254}`);
                         }
 
                         if (!cal || typeof cal !== 'object') {
@@ -349,6 +375,19 @@ const definition = {
 
                         if (!Number.isInteger(cal.channel) || cal.channel < 1 || cal.channel > 6) {
                             throw new Error('Calibration must specify an integer "channel" between 1 and 6');
+                        }
+                        if (cal.cct !== undefined) {
+                            // Convenience form: derive the Planckian locus xy from a CCT,
+                            // e.g. {"channel": 5, "cct": 3000} for a 3000K warm white.
+                            if (cal.x !== undefined || cal.y !== undefined) {
+                                throw new Error('Calibration accepts either "cct" or "x"/"y", not both');
+                            }
+                            if (typeof cal.cct !== 'number' || cal.cct < 1667 || cal.cct > 25000) {
+                                throw new Error('Calibration "cct" must be a number between 1667 and 25000 (Kelvin)');
+                            }
+                            const xy = cctToXy(cal.cct);
+                            cal.x = xy.x;
+                            cal.y = xy.y;
                         }
                         if (cal.flux !== undefined && (!Number.isInteger(cal.flux) || cal.flux < 0 || cal.flux > 254)) {
                             throw new Error('Calibration "flux" must be an integer between 0 and 254');
