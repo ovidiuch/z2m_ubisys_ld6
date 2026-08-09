@@ -155,7 +155,7 @@ const definition = {
             return {
                 ...m.light({
                     endpointName: name,
-                    colorTemp: { range: [153, 555] },
+                    colorTemp: { range: [133, 556] },
                     color: true,
                 }),
                 exposes: [], // Suppress static exposes
@@ -529,7 +529,7 @@ const definition = {
                             // widens it beyond the physical whites (RGB-assisted CT) and narrows
                             // it when AdvancedOptions bit #0 is set. Fall back to the range
                             // derived from the configured white primaries.
-                            let range = [153, 500]; // Default CCT range
+                            let range = [133, 556]; // Fallback: measured device-reported range with full RGB mixing
                             if (physMinMireds && physMaxMireds) {
                                 range = [physMinMireds, physMaxMireds];
                             } else if (cwMireds && wwMireds) {
@@ -561,7 +561,7 @@ const definition = {
                 [1, 5, 6, 7, 8, 9].forEach(epNum => {
                     const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
                     // Default to most capable light type so user can at least see controls
-                    exposesList.push(e.light_brightness_colortemp_colorxy([153, 555]).withEndpoint(name));
+                    exposesList.push(e.light_brightness_colortemp_colorxy([133, 556]).withEndpoint(name));
                     exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
                     exposesList.push(e.numeric('startup_level', ea.ALL).withValueMin(0).withValueMax(254).withEndpoint(name));
                     exposesList.push(e.binary('execute_if_off', ea.ALL, true, false).withEndpoint(name));
