@@ -41,8 +41,9 @@ const fzOutputConfiguration = {
     type: ['attributeReport', 'readResponse'],
     convert: (model, msg, publish, options, meta) => {
         if (msg.data.outputConfigurations) {
-            const elements = msg.data.outputConfigurations.map(buf => [buf.length, ...buf]);
-            const raw = Buffer.from([0x48, 0x41, 0x06, 0x00, ...elements.flat()]).toString('hex');
+            const configs = msg.data.outputConfigurations;
+            const elements = configs.map(buf => [buf.length, ...buf]);
+            const raw = Buffer.from([0x48, 0x41, configs.length & 0xFF, (configs.length >> 8) & 0xFF, ...elements.flat()]).toString('hex');
             return { output_configuration_raw: raw };
         }
     },
@@ -83,6 +84,32 @@ function xyToMireds(x, y) {
 }
 
 /**
+ * Approximates the Planckian locus point for a color temperature (Kim et al.
+ * cubic spline approximation, CIE 1931; valid for 1667K-25000K). Reproduces
+ * the ubisys built-in white reference points to within ~1e-3.
+ * @param {number} kelvin - Color temperature in Kelvin
+ * @returns {{x: number, y: number}} CIE 1931 chromaticity coordinates
+ */
+function cctToXy(kelvin) {
+    const T = kelvin;
+    let x;
+    if (T <= 4000) {
+        x = -0.2661239e9 / T ** 3 - 0.2343589e6 / T ** 2 + 0.8776956e3 / T + 0.179910;
+    } else {
+        x = -3.0258469e9 / T ** 3 + 2.1070379e6 / T ** 2 + 0.2226347e3 / T + 0.240390;
+    }
+    let y;
+    if (T <= 2222) {
+        y = -1.1063814 * x ** 3 - 1.34811020 * x ** 2 + 2.18555832 * x - 0.20219683;
+    } else if (T <= 4000) {
+        y = -0.9549476 * x ** 3 - 1.37418593 * x ** 2 + 2.09137015 * x - 0.16748867;
+    } else {
+        y = 3.0817580 * x ** 3 - 5.87338670 * x ** 2 + 3.75112997 * x - 0.37001483;
+    }
+    return { x, y };
+}
+
+/**
  * Safely retrieves the ubisys device setup endpoint (232).
  * @param {Device} device - zigbee-herdsman device object
  * @returns {Endpoint} The setup endpoint or throws if not found.
@@ -97,32 +124,15 @@ function getSetupEndpoint(device) {
  * Writes a structured attribute to the manufacturer-specific setup cluster.
  * @param {Device} device - zigbee-herdsman device
  * @param {number} attrId - Attribute ID (e.g., 0x0010 for outputConfigurations)
- * @param {Array} elements - Array of Buffers
- * @param {number} dataType - Zcl.DataType (default: ARRAY)
+ * @param {Array} elements - Array elements (Buffers for OCTET_STR, numbers for DATA8)
+ * @param {number} elementType - Zcl.DataType of the array elements (default: OCTET_STR)
  */
-async function writeSetupAttribute(device, attrId, elements, dataType = Zcl.DataType.ARRAY) {
+async function writeSetupAttribute(device, attrId, elements, elementType = Zcl.DataType.OCTET_STR) {
     const endpoint = getSetupEndpoint(device);
     await endpoint.writeStructured('manuSpecificUbisysDeviceSetup', [{
-        attrId, selector: {}, dataType,
-        elementData: { elementType: Zcl.DataType.OCTET_STR, elements }
+        attrId, selector: {}, dataType: Zcl.DataType.ARRAY,
+        elementData: { elementType, elements }
     }]);
-}
-
-/**
- * Resolves a bitfield value for advanced options based on the current state.
- * @param {Object} state - Current device state
- * @param {string} key - The key being set
- * @param {boolean} value - New value for the key
- * @param {Array} bitMapping - List of keys mapping to bits 0, 1, 2...
- * @returns {number} The combined bitmask
- */
-function resolveAdvancedOptions(state, key, value, bitMapping) {
-    let mask = 0;
-    bitMapping.forEach((mappedKey, index) => {
-        const val = (key === mappedKey) ? value : (state[mappedKey] || false);
-        if (val) mask |= (1 << index);
-    });
-    return mask;
 }
 
 const definition = {
@@ -145,43 +155,38 @@ const definition = {
             return {
                 ...m.light({
                     endpointName: name,
-                    colorTemp: { range: [153, 555] },
+                    colorTemp: { range: [133, 556] },
                     color: true,
                 }),
                 exposes: [], // Suppress static exposes
             };
         }),
         m.deviceAddCustomCluster('manuSpecificUbisysDeviceSetup', {
+            name: 'manuSpecificUbisysDeviceSetup',
             ID: 0xfc00,
             attributes: {
-                inputConfigurations: { ID: 0x0000, type: Zcl.DataType.ARRAY, write: true },
-                inputActions: { ID: 0x0001, type: Zcl.DataType.ARRAY, write: true },
-                outputConfigurations: { ID: 0x0010, type: Zcl.DataType.ARRAY, write: true },
-            },
-            commands: {}, commandsResponse: {},
-        }),
-        m.deviceAddCustomCluster('lightingBallastCfg', {
-            ID: Zcl.Clusters.lightingBallastCfg.ID,
-            attributes: {
-                physicalMinLevel: { ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
-                physicalMaxLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
+                inputConfigurations: { name: 'inputConfigurations', ID: 0x0000, type: Zcl.DataType.ARRAY, write: true },
+                inputActions: { name: 'inputActions', ID: 0x0001, type: Zcl.DataType.ARRAY, write: true },
+                outputConfigurations: { name: 'outputConfigurations', ID: 0x0010, type: Zcl.DataType.ARRAY, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('lightingColorCtrl', {
+            name: 'lightingColorCtrl',
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
-                advancedOptions: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                advancedOptions: { name: 'advancedOptions', ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('genLevelCtrl', {
+            name: 'genLevelCtrl',
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
-                minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
-                options: { ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
-                onOffTransitionTime: { ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
-                startUpCurrentLevel: { ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
+                // options, onOffTransitionTime and startUpCurrentLevel are already part of
+                // the standard genLevelCtrl definition; only the manufacturer-specific
+                // MinimumOnLevel needs to be added here
+                minimumOnLevel: { name: 'minimumOnLevel', ID: 0x0000, type: Zcl.DataType.UINT8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
@@ -193,7 +198,8 @@ const definition = {
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
-                        if (msg.data.inputConfigurations !== undefined) result.input_configurations = msg.data.inputConfigurations.map(b => b[0]);
+                        // InputConfigurations elements are 8-bit data (0x08); herdsman parses them as plain numbers
+                        if (msg.data.inputConfigurations !== undefined) result.input_configurations = msg.data.inputConfigurations;
                         if (msg.data.inputActions !== undefined) result.input_actions = msg.data.inputActions.map(b => b.toString('hex'));
                         return result;
                     },
@@ -208,8 +214,6 @@ const definition = {
                                 advanced_options_no_color_white: (val & 0x01) > 0,
                                 advanced_options_no_first_white_color: (val & 0x02) > 0,
                                 advanced_options_no_second_white_color: (val & 0x04) > 0,
-                                advanced_options_ignore_color_temp_range: (val & 0x08) > 0,
-                                advanced_options_constant_luminous_flux: (val & 0x10) > 0,
                             };
                         }
                     },
@@ -231,8 +235,8 @@ const definition = {
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
-                        if (msg.data.physicalMinLevel !== undefined) result.ballast_min_level = msg.data.physicalMinLevel;
-                        if (msg.data.physicalMaxLevel !== undefined) result.ballast_max_level = msg.data.physicalMaxLevel;
+                        if (msg.data.minLevel !== undefined) result.ballast_min_level = msg.data.minLevel;
+                        if (msg.data.maxLevel !== undefined) result.ballast_max_level = msg.data.maxLevel;
                         return result;
                     },
                 },
@@ -261,8 +265,11 @@ const definition = {
                 {
                     key: ['input_configurations'],
                     convertSet: async (entity, key, value, meta) => {
-                        const data = value.map(val => Buffer.from([val]));
-                        await writeSetupAttribute(meta.device, 0x0000, data);
+                        // InputConfigurations is an array of 8-bit data (0x08), one byte per physical input
+                        if (!Array.isArray(value) || value.some(v => !Number.isInteger(v) || v < 0 || v > 0xff)) {
+                            throw new Error('input_configurations must be an array of bytes (0-255), e.g. [0, 0, 0]');
+                        }
+                        await writeSetupAttribute(meta.device, 0x0000, value, Zcl.DataType.DATA8);
                         return { state: { input_configurations: value } };
                     },
                     convertGet: async (entity, key, meta) => {
@@ -283,20 +290,23 @@ const definition = {
                 {
                     key: [
                         'advanced_options_no_color_white', 'advanced_options_no_first_white_color', 'advanced_options_no_second_white_color',
-                        'advanced_options_ignore_color_temp_range', 'advanced_options_constant_luminous_flux'
                     ],
                     convertSet: async (entity, key, value, meta) => {
-                        // Handle the 1-byte bitmask attribute for advanced features
+                        // Read-modify-write on the device value: Z2M's cached state can be
+                        // stale for the other bits (changed via Dev console or the ubisys
+                        // app). Bits #3..#7 are reserved (manual 6.4.8.1) and must be
+                        // written as 0, so the result is masked to the three defined bits.
                         const bitMapping = [
                             'advanced_options_no_color_white',
                             'advanced_options_no_first_white_color',
                             'advanced_options_no_second_white_color',
-                            'advanced_options_ignore_color_temp_range',
-                            'advanced_options_constant_luminous_flux'
                         ];
-                        const val = resolveAdvancedOptions(meta.state, key, value, bitMapping);
+                        const resp = await entity.read('lightingColorCtrl', ['advancedOptions'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
+                        const current = (resp && resp.advancedOptions) || 0;
+                        const bit = 1 << bitMapping.indexOf(key);
+                        const val = (value ? current | bit : current & ~bit) & 0x07;
                         await entity.write('lightingColorCtrl', { advancedOptions: val }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
-                        return { state: { [key]: value } };
+                        return { state: Object.fromEntries(bitMapping.map((k, i) => [k, (val & (1 << i)) > 0])) };
                     },
                     convertGet: async (entity, key, meta) => {
                         await entity.read('lightingColorCtrl', ['advancedOptions'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
@@ -332,17 +342,17 @@ const definition = {
                     key: ['ballast_min_level', 'ballast_max_level'],
                     convertSet: async (entity, key, value, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.write('lightingBallastCfg', { physicalMinLevel: value });
+                            await entity.write('lightingBallastCfg', { minLevel: value });
                         } else if (key === 'ballast_max_level') {
-                            await entity.write('lightingBallastCfg', { physicalMaxLevel: value });
+                            await entity.write('lightingBallastCfg', { maxLevel: value });
                         }
                         return { state: { [key]: value } };
                     },
                     convertGet: async (entity, key, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.read('lightingBallastCfg', ['physicalMinLevel']);
+                            await entity.read('lightingBallastCfg', ['minLevel']);
                         } else if (key === 'ballast_max_level') {
-                            await entity.read('lightingBallastCfg', ['physicalMaxLevel']);
+                            await entity.read('lightingBallastCfg', ['maxLevel']);
                         }
                     },
                 },
@@ -356,15 +366,36 @@ const definition = {
                             }
                             cal = typeof value === 'string' ? JSON.parse(value) : value;
                         } catch (err) {
-                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254}`);
+                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254} or {"channel": 1..6, "cct": 1667..25000, "flux": 0..254}`);
                         }
 
                         if (!cal || typeof cal !== 'object') {
                             throw new Error('Calibration must be a JSON object');
                         }
 
-                        if (cal.channel === undefined || cal.channel < 1 || cal.channel > 6) {
-                            throw new Error('Calibration must specify a "channel" between 1 and 6');
+                        if (!Number.isInteger(cal.channel) || cal.channel < 1 || cal.channel > 6) {
+                            throw new Error('Calibration must specify an integer "channel" between 1 and 6');
+                        }
+                        if (cal.cct !== undefined) {
+                            // Convenience form: derive the Planckian locus xy from a CCT,
+                            // e.g. {"channel": 5, "cct": 3000} for a 3000K warm white.
+                            if (cal.x !== undefined || cal.y !== undefined) {
+                                throw new Error('Calibration accepts either "cct" or "x"/"y", not both');
+                            }
+                            if (typeof cal.cct !== 'number' || cal.cct < 1667 || cal.cct > 25000) {
+                                throw new Error('Calibration "cct" must be a number between 1667 and 25000 (Kelvin)');
+                            }
+                            const xy = cctToXy(cal.cct);
+                            cal.x = xy.x;
+                            cal.y = xy.y;
+                        }
+                        if (cal.flux !== undefined && (!Number.isInteger(cal.flux) || cal.flux < 0 || cal.flux > 254)) {
+                            throw new Error('Calibration "flux" must be an integer between 0 and 254');
+                        }
+                        for (const coord of ['x', 'y']) {
+                            if (cal[coord] !== undefined && (typeof cal[coord] !== 'number' || cal[coord] < 0 || cal[coord] > 1)) {
+                                throw new Error(`Calibration "${coord}" must be a number between 0 and 1`);
+                            }
                         }
 
                         const setupEp = getSetupEndpoint(meta.device);
@@ -378,13 +409,15 @@ const definition = {
                             const el = Buffer.from(buf);
                             if (i === (cal.channel - 1)) {
                                 if (cal.flux !== undefined) el[1] = cal.flux;
+                                // CIE 1931 coordinates are value * 65536, little-endian,
+                                // valid range 0..65279 (0xFFFF denotes invalid/unknown)
                                 if (cal.x !== undefined) {
-                                    const x = Math.round(cal.x * 65536);
+                                    const x = Math.min(65279, Math.round(cal.x * 65536));
                                     el[2] = x & 0xFF;
                                     el[3] = (x >> 8) & 0xFF;
                                 }
                                 if (cal.y !== undefined) {
-                                    const y = Math.round(cal.y * 65536);
+                                    const y = Math.min(65279, Math.round(cal.y * 65536));
                                     el[4] = y & 0xFF;
                                     el[5] = (y >> 8) & 0xFF;
                                 }
@@ -417,11 +450,12 @@ const definition = {
             exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
             // on_off_transition_time moved to per-endpoint loop
-            exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_ignore_color_temp_range', ea.ALL, true, false));
-            exposesList.push(e.binary('advanced_options_constant_luminous_flux', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false)
+                .withDescription('Compose CT-mode white only from the white channels; narrows the CT range to the calibrated whites. The firmware applies this fully only at boot: power-cycle the device after changing, then restart Z2M (see README).'));
+            exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false)
+                .withDescription('Exclude the first (cool) white from color rendering. Power-cycle the device after changing.'));
+            exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false)
+                .withDescription('Exclude the second (warm) white from color rendering. Power-cycle the device after changing.'));
             exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
@@ -445,10 +479,12 @@ const definition = {
                     const ep = device.getEndpoint(epNum);
                     if (ep) {
                         const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
-                        let colorCapabilities;
+                        let colorCapabilities, physMinMireds, physMaxMireds;
                         try {
                             if (ep.supportsInputCluster('lightingColorCtrl')) {
                                 colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
+                                physMinMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMin');
+                                physMaxMireds = ep.getClusterAttributeValue('lightingColorCtrl', 'colorTempPhysicalMax');
                             }
                         } catch (e) { /* ignore */ }
 
@@ -489,8 +525,14 @@ const definition = {
 
                         // 3. Expose provisions
                         if (hasColorTemp) {
-                            let range = [153, 500]; // Default CCT range
-                            if (cwMireds && wwMireds) {
+                            // Prefer the range the device itself reports: the Versalight engine
+                            // widens it beyond the physical whites (RGB-assisted CT) and narrows
+                            // it when AdvancedOptions bit #0 is set. Fall back to the range
+                            // derived from the configured white primaries.
+                            let range = [133, 556]; // Fallback: measured device-reported range with full RGB mixing
+                            if (physMinMireds && physMaxMireds) {
+                                range = [physMinMireds, physMaxMireds];
+                            } else if (cwMireds && wwMireds) {
                                 range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
                             }
 
@@ -519,7 +561,7 @@ const definition = {
                 [1, 5, 6, 7, 8, 9].forEach(epNum => {
                     const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
                     // Default to most capable light type so user can at least see controls
-                    exposesList.push(e.light_brightness_colortemp_colorxy([153, 555]).withEndpoint(name));
+                    exposesList.push(e.light_brightness_colortemp_colorxy([133, 556]).withEndpoint(name));
                     exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
                     exposesList.push(e.numeric('startup_level', ea.ALL).withValueMin(0).withValueMax(254).withEndpoint(name));
                     exposesList.push(e.binary('execute_if_off', ea.ALL, true, false).withEndpoint(name));
@@ -552,13 +594,31 @@ const definition = {
 
                     // Check color capabilities if cluster exists
                     if (ep.supportsInputCluster('lightingColorCtrl')) {
-                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMin', 'colorTempPhysicalMax']);
                     }
                     if (ep.supportsInputCluster('lightingBallastCfg')) {
-                        await ep.read('lightingBallastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
+                        await ep.read('lightingBallastCfg', ['minLevel', 'maxLevel']);
                     }
                     await ep.read('genLevelCtrl', ['startUpCurrentLevel', 'options']);
                 } catch (e) { console.warn(`ubisys LD6: Failed to configure endpoint ${epNum}: ${e.message}`); }
+            }
+        }
+    },
+    onEvent: async (type, data, device) => {
+        // The LD6 recomputes colorTempPhysicalMin/Max (and its effective CT
+        // clamping) only at boot, from the active mixing mode and the white
+        // calibration. Refresh the cached values on every device announce so
+        // the next exposes recalculation (Z2M restart) picks up the current
+        // range.
+        if (type === 'deviceAnnounce') {
+            for (const ep of device.endpoints) {
+                if (ep.supportsInputCluster('lightingColorCtrl')) {
+                    try {
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTempPhysicalMin', 'colorTempPhysicalMax']);
+                    } catch (e) {
+                        // Device may still be waking up; configure or the next announce will retry.
+                    }
+                }
             }
         }
     },
