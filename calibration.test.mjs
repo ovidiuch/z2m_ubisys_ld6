@@ -123,8 +123,14 @@ const tests = {
         );
     },
 
+    async 'the published value is structured, not a JSON string'() {
+        assert.ok(Array.isArray(readState().calibration_current), 'must publish an array');
+        const { result } = await set([{ channel: 1, flux: 51 }]);
+        assert.ok(Array.isArray(result.state.calibration_current), 'must publish an array after a write too');
+    },
+
     async 'reading decodes every channel, disabled ones included'() {
-        const decoded = JSON.parse(readState().calibration_current);
+        const decoded = readState().calibration_current;
         assert.deepEqual(decoded[0], {
             channel: 1, type: 'red', endpoint: 1, flux: 71, x: 0.691498, y: 0.308334,
         });
@@ -134,12 +140,12 @@ const tests = {
     },
 
     async 'a mono channel reports no coordinates or flux'() {
-        const decoded = JSON.parse(readState([[0x10, 0xff, 0xff, 0xff, 0xff, 0xff]]).calibration_current);
+        const decoded = readState([[0x10, 0xff, 0xff, 0xff, 0xff, 0xff]]).calibration_current;
         assert.deepEqual(decoded[0], { channel: 1, type: 'mono', endpoint: 1 });
     },
 
     async 'a second logical endpoint is reported'() {
-        const decoded = JSON.parse(readState([[0x52, 0xfe, 0xb9, 0x75, 0x1d, 0x69]]).calibration_current);
+        const decoded = readState([[0x52, 0xfe, 0xb9, 0x75, 0x1d, 0x69]]).calibration_current;
         assert.equal(decoded[0].type, 'warm_white');
         assert.equal(decoded[0].endpoint, 5);
     },
@@ -160,7 +166,7 @@ const tests = {
 
     async 'writing publishes the new calibration as state'() {
         const { result } = await set([{ channel: 1, flux: 51 }]);
-        assert.equal(JSON.parse(result.state.calibration_current)[0].flux, 51);
+        assert.equal(result.state.calibration_current[0].flux, 51);
     },
 
     async 'calibration_current cannot be written'() {

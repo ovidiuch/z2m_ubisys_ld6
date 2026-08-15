@@ -219,7 +219,11 @@ mosquitto_pub -t 'zigbee2mqtt/YOUR_LD6_NAME/get' -m '{"calibration_current": ""}
 ]
 ```
 
-`type` and `endpoint` are informational and ignored on write. Coordinates carry enough precision to re-encode to the same bytes, so a read/write round-trip leaves untouched channels bit-identical. It also refreshes on every read of the output configuration, and after each successful write.
+It is published as structured JSON, not as a string, so it reads like the rest of the state document and can be picked apart directly (`jq '.calibration_current'`).
+
+`type` and `endpoint` are informational and ignored on write. Coordinates carry enough precision to re-encode to the same bytes, so a read/write round-trip leaves untouched channels bit-identical. The value also refreshes on every read of the output configuration, and after each successful write.
+
+Note that the reply arrives as a normal state publish on `zigbee2mqtt/YOUR_LD6_NAME`, not on the `/get` topic. To receive only this field, run Zigbee2MQTT with the `output` setting set to `attribute` or `attribute_and_json`, which publishes each field to its own subtopic (`zigbee2mqtt/YOUR_LD6_NAME/calibration_current`).
 
 ### Calibrating the whites and the CCT range
 

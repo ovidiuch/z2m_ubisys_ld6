@@ -46,7 +46,7 @@ const fzOutputConfiguration = {
             const raw = Buffer.from([0x48, 0x41, configs.length & 0xFF, (configs.length >> 8) & 0xFF, ...elements.flat()]).toString('hex');
             return {
                 output_configuration_raw: raw,
-                calibration_current: JSON.stringify(decodeCalibration(configs)),
+                calibration_current: decodeCalibration(configs),
             };
         }
     },
@@ -500,7 +500,7 @@ const definition = {
                         return {
                             state: {
                                 calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}`,
-                                calibration_current: JSON.stringify(decodeCalibration(elements)),
+                                calibration_current: decodeCalibration(elements),
                             },
                         };
                     },
@@ -541,7 +541,7 @@ const definition = {
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
             exposesList.push(e.text('calibration', ea.SET)
                 .withDescription('Calibrate the primaries: one entry, or an array of entries, one per channel.'));
-            exposesList.push(e.text('calibration_current', ea.STATE_GET)
+            exposesList.push(e.list('calibration_current', ea.STATE_GET, e.text('entry', ea.STATE))
                 .withDescription('Current calibration, in the shape "calibration" accepts — read it, edit it, write it back.'));
             exposesList.push(e.text('calibration_status', ea.STATE));
 
