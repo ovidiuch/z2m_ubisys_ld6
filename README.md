@@ -185,6 +185,24 @@ Instead of manually building hex strings for `output_configuration`, use the `ca
 - **`cct`**: alternative to `x`/`y` — a color temperature in Kelvin (1667-25000); the converter computes the Planckian locus coordinates for you. `{"channel": 5, "cct": 3000}` is equivalent to the payload above.
 - **`flux`**: Relative luminous flux (0 to 254).
 
+Fields are independent: omit `flux` to patch only the coordinates, or omit `x`/`y`/`cct` to patch only the flux.
+
+### Calibrating every channel at once
+
+`calibration` also accepts an **array** of entries, which calibrates a whole strip from a single payload:
+
+```json
+[
+  {"channel": 1, "x": 0.6926, "y": 0.3069, "flux": 51},
+  {"channel": 2, "x": 0.1342, "y": 0.7164, "flux": 121},
+  {"channel": 3, "x": 0.1381, "y": 0.0535, "flux": 25},
+  {"channel": 4, "x": 0.3108, "y": 0.3267, "flux": 254},
+  {"channel": 5, "x": 0.5263, "y": 0.4137, "flux": 188}
+]
+```
+
+`OutputConfigurations` is a single attribute holding all channels, so every calibration command is already a read-modify-write of the whole array. Sending one array instead of N objects turns 2N Zigbee transactions into two, and makes the update atomic: entries are validated up front, so the device is never left half-calibrated by a payload that fails midway. Listing the same channel twice is rejected.
+
 ### Calibrating the whites and the CCT range
 
 The device recomputes its reported color temperature range **at boot**, from the active mixing mode and the calibrated whites:
