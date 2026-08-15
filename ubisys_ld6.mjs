@@ -44,7 +44,10 @@ const fzOutputConfiguration = {
             const configs = msg.data.outputConfigurations;
             const elements = configs.map(buf => [buf.length, ...buf]);
             const raw = Buffer.from([0x48, 0x41, configs.length & 0xFF, (configs.length >> 8) & 0xFF, ...elements.flat()]).toString('hex');
-            return { output_configuration_raw: raw };
+            return {
+                output_configuration_raw: raw,
+                calibration_current: JSON.stringify(decodeCalibration(configs)),
+            };
         }
     },
 };
@@ -107,6 +110,40 @@ function cctToXy(kelvin) {
         y = 3.0817580 * x ** 3 - 5.87338670 * x ** 2 + 3.75112997 * x - 0.37001483;
     }
     return { x, y };
+}
+
+// Low nibble of a channel's type byte; the high nibble is the logical endpoint.
+const CHANNEL_FUNCTIONS = { 0: 'mono', 1: 'cool_white', 2: 'warm_white', 3: 'red', 4: 'green', 5: 'blue' };
+
+/**
+ * Decodes OutputConfigurations into per-channel entries, in the same shape the
+ * `calibration` field accepts — so a value read back can be edited and written
+ * again. Coordinates keep enough precision to re-encode to the same bytes.
+ * @param {Array<Buffer>} configs - Attribute value, one octet string per channel
+ * @returns {Array<object>} One entry per channel
+ */
+function decodeCalibration(configs) {
+    return configs.map((buf, i) => {
+        const el = Buffer.from(buf);
+        const channel = i + 1;
+        if (el[0] === 0x00) return { channel, type: 'disabled' };
+
+        const fn = el[0] & 0x0F;
+        const entry = {
+            channel,
+            type: CHANNEL_FUNCTIONS[fn] ?? `unknown_0x${el[0].toString(16).padStart(2, '0')}`,
+            endpoint: (el[0] >> 4) & 0x0F,
+        };
+        // 0xFF marks an unset intensity, 0xFFFF an unset coordinate
+        if (el[1] !== 0xFF) entry.flux = el[1];
+        const x = el[2] | (el[3] << 8);
+        const y = el[4] | (el[5] << 8);
+        if (x !== 0xFFFF && y !== 0xFFFF) {
+            entry.x = Number((x / 65536).toFixed(6));
+            entry.y = Number((y / 65536).toFixed(6));
+        }
+        return entry;
+    });
 }
 
 /**
@@ -392,8 +429,11 @@ const definition = {
                     },
                 },
                 {
-                    key: ['calibration'],
+                    key: ['calibration', 'calibration_current'],
                     convertSet: async (entity, key, value, meta) => {
+                        if (key === 'calibration_current') {
+                            throw new Error('calibration_current is read-only; write to "calibration" instead');
+                        }
                         let parsed;
                         try {
                             if (!value || (typeof value === 'string' && value.trim() === '')) {
@@ -457,7 +497,16 @@ const definition = {
 
                         await writeSetupAttribute(meta.device, 0x0010, elements);
                         const channels = [...byChannel.keys()].sort((a, b) => a - b).join(', ');
-                        return { state: { calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}` } };
+                        return {
+                            state: {
+                                calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}`,
+                                calibration_current: JSON.stringify(decodeCalibration(elements)),
+                            },
+                        };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        // The read response is decoded into calibration_current by fzOutputConfiguration
+                        await getSetupEndpoint(meta.device).read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
                     },
                 }
             ],
@@ -490,7 +539,10 @@ const definition = {
             exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
-            exposesList.push(e.text('calibration', ea.SET));
+            exposesList.push(e.text('calibration', ea.SET)
+                .withDescription('Calibrate the primaries: one entry, or an array of entries, one per channel.'));
+            exposesList.push(e.text('calibration_current', ea.STATE_GET)
+                .withDescription('Current calibration, in the shape "calibration" accepts — read it, edit it, write it back.'));
             exposesList.push(e.text('calibration_status', ea.STATE));
 
             /**

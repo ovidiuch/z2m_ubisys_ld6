@@ -16,6 +16,14 @@ const calibration = definition.extend
     .find((tz) => tz.key?.includes('calibration'));
 assert.ok(calibration, 'calibration converter not found');
 
+const fzOutput = definition.extend
+    .flatMap((ext) => ext.fromZigbee ?? [])
+    .find((fz) => fz.cluster === 'manuSpecificUbisysDeviceSetup' && fz.type?.includes('readResponse'));
+assert.ok(fzOutput, 'outputConfigurations reporter not found');
+
+const readState = (config = RGBWW) =>
+    fzOutput.convert(null, { data: { outputConfigurations: config.map((el) => Buffer.from(el)) } }, null, null, null);
+
 function makeDevice(config = RGBWW) {
     const calls = { reads: 0, writes: [] };
     const endpoint = {
@@ -112,6 +120,54 @@ const tests = {
         await assert.rejects(
             calibration.convertSet(null, 'calibration', [], { device }),
             /at least one entry/,
+        );
+    },
+
+    async 'reading decodes every channel, disabled ones included'() {
+        const decoded = JSON.parse(readState().calibration_current);
+        assert.deepEqual(decoded[0], {
+            channel: 1, type: 'red', endpoint: 1, flux: 71, x: 0.691498, y: 0.308334,
+        });
+        assert.deepEqual(decoded[3].type, 'cool_white');
+        assert.deepEqual(decoded[4].type, 'warm_white');
+        assert.deepEqual(decoded[5], { channel: 6, type: 'disabled' });
+    },
+
+    async 'a mono channel reports no coordinates or flux'() {
+        const decoded = JSON.parse(readState([[0x10, 0xff, 0xff, 0xff, 0xff, 0xff]]).calibration_current);
+        assert.deepEqual(decoded[0], { channel: 1, type: 'mono', endpoint: 1 });
+    },
+
+    async 'a second logical endpoint is reported'() {
+        const decoded = JSON.parse(readState([[0x52, 0xfe, 0xb9, 0x75, 0x1d, 0x69]]).calibration_current);
+        assert.equal(decoded[0].type, 'warm_white');
+        assert.equal(decoded[0].endpoint, 5);
+    },
+
+    async 'what is read can be written back byte for byte'() {
+        const calibrated = [
+            [0x13, 51, 0x4e, 0xb1, 0x91, 0x4e],
+            [0x14, 121, 0x5b, 0x22, 0x66, 0xb7],
+            [0x15, 25, 0x5b, 0x23, 0xb2, 0x0d],
+            [0x11, 254, 0x91, 0x4f, 0xa3, 0x53],
+            [0x12, 188, 0xbc, 0x86, 0xe8, 0x69],
+            [0x00, 0xff, 0xff, 0xff, 0xff, 0xff],
+        ];
+        const decoded = readState(calibrated).calibration_current;
+        const { writes } = await set(decoded, calibrated);
+        assert.deepEqual(writes[0].map(hex), calibrated.map((el) => hex(Buffer.from(el))));
+    },
+
+    async 'writing publishes the new calibration as state'() {
+        const { result } = await set([{ channel: 1, flux: 51 }]);
+        assert.equal(JSON.parse(result.state.calibration_current)[0].flux, 51);
+    },
+
+    async 'calibration_current cannot be written'() {
+        const { device } = makeDevice();
+        await assert.rejects(
+            calibration.convertSet(null, 'calibration_current', '[]', { device }),
+            /read-only/,
         );
     },
 };

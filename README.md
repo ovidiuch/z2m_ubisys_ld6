@@ -203,6 +203,24 @@ Fields are independent: omit `flux` to patch only the coordinates, or omit `x`/`
 
 `OutputConfigurations` is a single attribute holding all channels, so every calibration command is already a read-modify-write of the whole array. Sending one array instead of N objects turns 2N Zigbee transactions into two, and makes the update atomic: entries are validated up front, so the device is never left half-calibrated by a payload that fails midway. Listing the same channel twice is rejected.
 
+### Reading the current calibration
+
+`calibration_current` reports the device's calibration in the same shape `calibration` accepts, so it can be read, edited and written back:
+
+```bash
+mosquitto_pub -t 'zigbee2mqtt/YOUR_LD6_NAME/get' -m '{"calibration_current": ""}'
+```
+
+```json
+[
+  {"channel": 1, "type": "red", "endpoint": 1, "flux": 51, "x": 0.6926, "y": 0.306976},
+  {"channel": 4, "type": "cool_white", "endpoint": 1, "flux": 254, "x": 0.310791, "y": 0.326675},
+  {"channel": 6, "type": "disabled"}
+]
+```
+
+`type` and `endpoint` are informational and ignored on write. Coordinates carry enough precision to re-encode to the same bytes, so a read/write round-trip leaves untouched channels bit-identical. It also refreshes on every read of the output configuration, and after each successful write.
+
 ### Calibrating the whites and the CCT range
 
 The device recomputes its reported color temperature range **at boot**, from the active mixing mode and the calibrated whites:
@@ -244,6 +262,7 @@ See the ubisys LD6 Technical Reference Manual for the full configuration format.
 | `output_configuration_raw` | Read | Raw configuration as hex |
 | `output_configuration` | Write | Write raw configuration |
 | `calibration` | Write | Calibration helper (see format above) |
+| `calibration_current` | Read | Current calibration, in the format `calibration` accepts |
 | `calibration_status` | Read | Result of last calibration command |
 | `zigbee_direct_interface` | Read/Write | Bluetooth interface status |
 | `zigbee_direct_anonymous_join_timeout` | Read/Write | Bluetooth join timeout |
