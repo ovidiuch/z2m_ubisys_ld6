@@ -185,6 +185,48 @@ Instead of manually building hex strings for `output_configuration`, use the `ca
 - **`cct`**: alternative to `x`/`y` — a color temperature in Kelvin (1667-25000); the converter computes the Planckian locus coordinates for you. `{"channel": 5, "cct": 3000}` is equivalent to the payload above.
 - **`flux`**: Relative luminous flux (0 to 254).
 
+Fields are independent: omit `flux` to patch only the coordinates, or omit `x`/`y`/`cct` to patch only the flux.
+
+### Calibrating every channel at once
+
+`calibration` also accepts an **array** of entries, which calibrates a whole strip from a single payload:
+
+```json
+[
+  {"channel": 1, "x": 0.6926, "y": 0.3069, "flux": 51},
+  {"channel": 2, "x": 0.1342, "y": 0.7164, "flux": 121},
+  {"channel": 3, "x": 0.1381, "y": 0.0535, "flux": 25},
+  {"channel": 4, "x": 0.3108, "y": 0.3267, "flux": 254},
+  {"channel": 5, "x": 0.5263, "y": 0.4137, "flux": 188}
+]
+```
+
+`OutputConfigurations` is a single attribute holding all channels, so every calibration command is already a read-modify-write of the whole array. Sending one array instead of N objects collapses that to a single read-modify-write no matter how many channels are calibrated, and makes the update atomic: entries are validated up front, so the device is never left half-calibrated by a payload that fails midway. Listing the same channel twice is rejected.
+
+After writing, the configuration is read back from the device, so the published `calibration_current` is what the device stored rather than what was sent. If that read fails, the written values are published instead and `calibration_status` says so.
+
+### Reading the current calibration
+
+`calibration_current` reports the device's calibration in the same shape `calibration` accepts, so it can be read, edited and written back:
+
+```bash
+mosquitto_pub -t 'zigbee2mqtt/YOUR_LD6_NAME/get' -m '{"calibration_current": ""}'
+```
+
+```json
+[
+  {"channel": 1, "type": "red", "endpoint": 1, "flux": 51, "x": 0.6926, "y": 0.306976},
+  {"channel": 4, "type": "cool_white", "endpoint": 1, "flux": 254, "x": 0.310791, "y": 0.326675},
+  {"channel": 6, "type": "disabled"}
+]
+```
+
+It is published as structured JSON, not as a string, so it reads like the rest of the state document and can be picked apart directly (`jq '.calibration_current'`).
+
+`type` and `endpoint` are informational and ignored on write. Coordinates carry enough precision to re-encode to the same bytes, so a read/write round-trip leaves untouched channels bit-identical. The value also refreshes on every read of the output configuration, and after each successful write.
+
+Note that the reply arrives as a normal state publish on `zigbee2mqtt/YOUR_LD6_NAME`, not on the `/get` topic. To receive only this field, run Zigbee2MQTT with the `output` setting set to `attribute` or `attribute_and_json`, which publishes each field to its own subtopic (`zigbee2mqtt/YOUR_LD6_NAME/calibration_current`).
+
 ### Calibrating the whites and the CCT range
 
 The device recomputes its reported color temperature range **at boot**, from the active mixing mode and the calibrated whites:
@@ -226,6 +268,7 @@ See the ubisys LD6 Technical Reference Manual for the full configuration format.
 | `output_configuration_raw` | Read | Raw configuration as hex |
 | `output_configuration` | Write | Write raw configuration |
 | `calibration` | Write | Calibration helper (see format above) |
+| `calibration_current` | Read | Current calibration, in the format `calibration` accepts |
 | `calibration_status` | Read | Result of last calibration command |
 | `zigbee_direct_interface` | Read/Write | Bluetooth interface status |
 | `zigbee_direct_anonymous_join_timeout` | Read/Write | Bluetooth join timeout |

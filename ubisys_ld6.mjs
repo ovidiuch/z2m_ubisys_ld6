@@ -44,7 +44,10 @@ const fzOutputConfiguration = {
             const configs = msg.data.outputConfigurations;
             const elements = configs.map(buf => [buf.length, ...buf]);
             const raw = Buffer.from([0x48, 0x41, configs.length & 0xFF, (configs.length >> 8) & 0xFF, ...elements.flat()]).toString('hex');
-            return { output_configuration_raw: raw };
+            return {
+                output_configuration_raw: raw,
+                calibration_current: decodeCalibration(configs),
+            };
         }
     },
 };
@@ -107,6 +110,75 @@ function cctToXy(kelvin) {
         y = 3.0817580 * x ** 3 - 5.87338670 * x ** 2 + 3.75112997 * x - 0.37001483;
     }
     return { x, y };
+}
+
+// Low nibble of a channel's type byte; the high nibble is the logical endpoint.
+const CHANNEL_FUNCTIONS = { 0: 'mono', 1: 'cool_white', 2: 'warm_white', 3: 'red', 4: 'green', 5: 'blue' };
+
+/**
+ * Decodes OutputConfigurations into per-channel entries, in the same shape the
+ * `calibration` field accepts — so a value read back can be edited and written
+ * again. Coordinates keep enough precision to re-encode to the same bytes.
+ * @param {Array<Buffer>} configs - Attribute value, one octet string per channel
+ * @returns {Array<object>} One entry per channel
+ */
+function decodeCalibration(configs) {
+    return configs.map((buf, i) => {
+        const el = Buffer.from(buf);
+        const channel = i + 1;
+        if (el[0] === 0x00) return { channel, type: 'disabled' };
+
+        const fn = el[0] & 0x0F;
+        const entry = {
+            channel,
+            type: CHANNEL_FUNCTIONS[fn] ?? `unknown_0x${el[0].toString(16).padStart(2, '0')}`,
+            endpoint: (el[0] >> 4) & 0x0F,
+        };
+        // 0xFF marks an unset intensity, 0xFFFF an unset coordinate
+        if (el[1] !== 0xFF) entry.flux = el[1];
+        const x = el[2] | (el[3] << 8);
+        const y = el[4] | (el[5] << 8);
+        if (x !== 0xFFFF && y !== 0xFFFF) {
+            entry.x = Number((x / 65536).toFixed(6));
+            entry.y = Number((y / 65536).toFixed(6));
+        }
+        return entry;
+    });
+}
+
+/**
+ * Validates one calibration entry and resolves the "cct" convenience form into
+ * x/y coordinates. Mutates the entry in place.
+ * @param {object} cal - Single calibration entry
+ */
+function validateCalibrationEntry(cal) {
+    if (!cal || typeof cal !== 'object' || Array.isArray(cal)) {
+        throw new Error('Each calibration entry must be a JSON object');
+    }
+    if (!Number.isInteger(cal.channel) || cal.channel < 1 || cal.channel > 6) {
+        throw new Error('Calibration must specify an integer "channel" between 1 and 6');
+    }
+    if (cal.cct !== undefined) {
+        // Convenience form: derive the Planckian locus xy from a CCT,
+        // e.g. {"channel": 5, "cct": 3000} for a 3000K warm white.
+        if (cal.x !== undefined || cal.y !== undefined) {
+            throw new Error('Calibration accepts either "cct" or "x"/"y", not both');
+        }
+        if (typeof cal.cct !== 'number' || cal.cct < 1667 || cal.cct > 25000) {
+            throw new Error('Calibration "cct" must be a number between 1667 and 25000 (Kelvin)');
+        }
+        const xy = cctToXy(cal.cct);
+        cal.x = xy.x;
+        cal.y = xy.y;
+    }
+    if (cal.flux !== undefined && (!Number.isInteger(cal.flux) || cal.flux < 0 || cal.flux > 254)) {
+        throw new Error('Calibration "flux" must be an integer between 0 and 254');
+    }
+    for (const coord of ['x', 'y']) {
+        if (cal[coord] !== undefined && (typeof cal[coord] !== 'number' || cal[coord] < 0 || cal[coord] > 1)) {
+            throw new Error(`Calibration "${coord}" must be a number between 0 and 1`);
+        }
+    }
 }
 
 /**
@@ -357,45 +429,36 @@ const definition = {
                     },
                 },
                 {
-                    key: ['calibration'],
+                    key: ['calibration', 'calibration_current'],
                     convertSet: async (entity, key, value, meta) => {
-                        let cal;
+                        if (key === 'calibration_current') {
+                            throw new Error('calibration_current is read-only; write to "calibration" instead');
+                        }
+                        let parsed;
                         try {
                             if (!value || (typeof value === 'string' && value.trim() === '')) {
                                 throw new Error('Empty or missing calibration value');
                             }
-                            cal = typeof value === 'string' ? JSON.parse(value) : value;
+                            parsed = typeof value === 'string' ? JSON.parse(value) : value;
                         } catch (err) {
-                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254} or {"channel": 1..6, "cct": 1667..25000, "flux": 0..254}`);
+                            throw new Error(`Invalid calibration JSON: ${err.message}. Expected format: {"channel": 1..6, "x": 0..1, "y": 0..1, "flux": 0..254} or {"channel": 1..6, "cct": 1667..25000, "flux": 0..254}, or an array of those to calibrate several channels at once`);
                         }
 
-                        if (!cal || typeof cal !== 'object') {
-                            throw new Error('Calibration must be a JSON object');
+                        // A single object calibrates one channel; an array calibrates
+                        // several within one read-modify-write, so a strip never ends
+                        // up half-calibrated and concurrent writes cannot race.
+                        const entries = Array.isArray(parsed) ? parsed : [parsed];
+                        if (entries.length === 0) {
+                            throw new Error('Calibration array must contain at least one entry');
                         }
 
-                        if (!Number.isInteger(cal.channel) || cal.channel < 1 || cal.channel > 6) {
-                            throw new Error('Calibration must specify an integer "channel" between 1 and 6');
-                        }
-                        if (cal.cct !== undefined) {
-                            // Convenience form: derive the Planckian locus xy from a CCT,
-                            // e.g. {"channel": 5, "cct": 3000} for a 3000K warm white.
-                            if (cal.x !== undefined || cal.y !== undefined) {
-                                throw new Error('Calibration accepts either "cct" or "x"/"y", not both');
+                        const byChannel = new Map();
+                        for (const cal of entries) {
+                            validateCalibrationEntry(cal);
+                            if (byChannel.has(cal.channel)) {
+                                throw new Error(`Calibration lists channel ${cal.channel} more than once`);
                             }
-                            if (typeof cal.cct !== 'number' || cal.cct < 1667 || cal.cct > 25000) {
-                                throw new Error('Calibration "cct" must be a number between 1667 and 25000 (Kelvin)');
-                            }
-                            const xy = cctToXy(cal.cct);
-                            cal.x = xy.x;
-                            cal.y = xy.y;
-                        }
-                        if (cal.flux !== undefined && (!Number.isInteger(cal.flux) || cal.flux < 0 || cal.flux > 254)) {
-                            throw new Error('Calibration "flux" must be an integer between 0 and 254');
-                        }
-                        for (const coord of ['x', 'y']) {
-                            if (cal[coord] !== undefined && (typeof cal[coord] !== 'number' || cal[coord] < 0 || cal[coord] > 1)) {
-                                throw new Error(`Calibration "${coord}" must be a number between 0 and 1`);
-                            }
+                            byChannel.set(cal.channel, cal);
                         }
 
                         const setupEp = getSetupEndpoint(meta.device);
@@ -404,10 +467,17 @@ const definition = {
                             throw new Error('Could not read current output configurations from device');
                         }
 
-                        // Modify only the requested channel in the existing configuration array
+                        for (const channel of byChannel.keys()) {
+                            if (channel > resp.outputConfigurations.length) {
+                                throw new Error(`Device reports ${resp.outputConfigurations.length} channels; cannot calibrate channel ${channel}`);
+                            }
+                        }
+
+                        // Modify only the requested channels in the existing configuration array
                         const elements = resp.outputConfigurations.map((buf, i) => {
                             const el = Buffer.from(buf);
-                            if (i === (cal.channel - 1)) {
+                            const cal = byChannel.get(i + 1);
+                            if (cal) {
                                 if (cal.flux !== undefined) el[1] = cal.flux;
                                 // CIE 1931 coordinates are value * 65536, little-endian,
                                 // valid range 0..65279 (0xFFFF denotes invalid/unknown)
@@ -426,7 +496,23 @@ const definition = {
                         });
 
                         await writeSetupAttribute(meta.device, 0x0010, elements);
-                        return { state: { calibration_status: `Updated channel ${cal.channel}` } };
+                        const channels = [...byChannel.keys()].sort((a, b) => a - b).join(', ');
+                        const state = { calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}` };
+
+                        // Read back, so the published calibration is what the device stored
+                        // rather than what we sent; fzOutputConfiguration decodes the response.
+                        try {
+                            await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
+                        } catch (err) {
+                            // Fall back to the written values, so the state is not left stale
+                            state.calibration_current = decodeCalibration(elements);
+                            state.calibration_status += ` (read-back failed: ${err.message})`;
+                        }
+                        return { state };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        // The read response is decoded into calibration_current by fzOutputConfiguration
+                        await getSetupEndpoint(meta.device).read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
                     },
                 }
             ],
@@ -459,7 +545,10 @@ const definition = {
             exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
             exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
             exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
-            exposesList.push(e.text('calibration', ea.SET));
+            exposesList.push(e.text('calibration', ea.SET)
+                .withDescription('Calibrate the primaries: one entry, or an array of entries, one per channel.'));
+            exposesList.push(e.list('calibration_current', ea.STATE_GET, e.text('entry', ea.STATE))
+                .withDescription('Current calibration, in the shape "calibration" accepts — read it, edit it, write it back.'));
             exposesList.push(e.text('calibration_status', ea.STATE));
 
             /**
