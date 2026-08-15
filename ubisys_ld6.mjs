@@ -497,12 +497,18 @@ const definition = {
 
                         await writeSetupAttribute(meta.device, 0x0010, elements);
                         const channels = [...byChannel.keys()].sort((a, b) => a - b).join(', ');
-                        return {
-                            state: {
-                                calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}`,
-                                calibration_current: decodeCalibration(elements),
-                            },
-                        };
+                        const state = { calibration_status: `Updated channel${byChannel.size > 1 ? 's' : ''} ${channels}` };
+
+                        // Read back, so the published calibration is what the device stored
+                        // rather than what we sent; fzOutputConfiguration decodes the response.
+                        try {
+                            await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
+                        } catch (err) {
+                            // Fall back to the written values, so the state is not left stale
+                            state.calibration_current = decodeCalibration(elements);
+                            state.calibration_status += ` (read-back failed: ${err.message})`;
+                        }
+                        return { state };
                     },
                     convertGet: async (entity, key, meta) => {
                         // The read response is decoded into calibration_current by fzOutputConfiguration

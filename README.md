@@ -201,7 +201,9 @@ Fields are independent: omit `flux` to patch only the coordinates, or omit `x`/`
 ]
 ```
 
-`OutputConfigurations` is a single attribute holding all channels, so every calibration command is already a read-modify-write of the whole array. Sending one array instead of N objects turns 2N Zigbee transactions into two, and makes the update atomic: entries are validated up front, so the device is never left half-calibrated by a payload that fails midway. Listing the same channel twice is rejected.
+`OutputConfigurations` is a single attribute holding all channels, so every calibration command is already a read-modify-write of the whole array. Sending one array instead of N objects collapses that to a single read-modify-write no matter how many channels are calibrated, and makes the update atomic: entries are validated up front, so the device is never left half-calibrated by a payload that fails midway. Listing the same channel twice is rejected.
+
+After writing, the configuration is read back from the device, so the published `calibration_current` is what the device stored rather than what was sent. If that read fails, the written values are published instead and `calibration_status` says so.
 
 ### Reading the current calibration
 

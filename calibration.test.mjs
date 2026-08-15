@@ -24,11 +24,14 @@ assert.ok(fzOutput, 'outputConfigurations reporter not found');
 const readState = (config = RGBWW) =>
     fzOutput.convert(null, { data: { outputConfigurations: config.map((el) => Buffer.from(el)) } }, null, null, null);
 
-function makeDevice(config = RGBWW) {
+function makeDevice(config = RGBWW, { failReadsAfter } = {}) {
     const calls = { reads: 0, writes: [] };
     const endpoint = {
         read: async () => {
             calls.reads++;
+            if (failReadsAfter !== undefined && calls.reads > failReadsAfter) {
+                throw new Error('device unreachable');
+            }
             return { outputConfigurations: config.map((el) => Buffer.from(el)) };
         },
         writeStructured: async (_cluster, records) => {
@@ -45,15 +48,14 @@ const set = (value, config) => {
 const hex = (buf) => [...buf].map((b) => b.toString(16).padStart(2, '0')).join(' ');
 
 const tests = {
-    async 'array calibrates every channel in a single read and write'() {
-        const { reads, writes, result } = await set([
+    async 'array calibrates every channel in a single write'() {
+        const { writes, result } = await set([
             { channel: 1, x: 0.6926, y: 0.3069, flux: 51 },
             { channel: 2, x: 0.1342, y: 0.7164, flux: 121 },
             { channel: 3, x: 0.1381, y: 0.0535, flux: 25 },
             { channel: 4, x: 0.3108, y: 0.3267, flux: 254 },
             { channel: 5, x: 0.5263, y: 0.4137, flux: 188 },
         ]);
-        assert.equal(reads, 1, 'expected exactly one read');
         assert.equal(writes.length, 1, 'expected exactly one write');
         assert.deepEqual(writes[0].map(hex), [
             '13 33 4e b1 91 4e',
@@ -125,8 +127,6 @@ const tests = {
 
     async 'the published value is structured, not a JSON string'() {
         assert.ok(Array.isArray(readState().calibration_current), 'must publish an array');
-        const { result } = await set([{ channel: 1, flux: 51 }]);
-        assert.ok(Array.isArray(result.state.calibration_current), 'must publish an array after a write too');
     },
 
     async 'reading decodes every channel, disabled ones included'() {
@@ -164,9 +164,19 @@ const tests = {
         assert.deepEqual(writes[0].map(hex), calibrated.map((el) => hex(Buffer.from(el))));
     },
 
-    async 'writing publishes the new calibration as state'() {
-        const { result } = await set([{ channel: 1, flux: 51 }]);
-        assert.equal(result.state.calibration_current[0].flux, 51);
+    async 'a write reads the configuration back from the device'() {
+        const { reads, result } = await set([{ channel: 1, flux: 51 }]);
+        assert.equal(reads, 2, 'one read to patch, one to confirm');
+        assert.equal(result.state.calibration_current, undefined,
+            'the confirmed value is published by the read response, not assumed here');
+    },
+
+    async 'a failed read-back falls back to the written values'() {
+        const { device, calls } = makeDevice(RGBWW, { failReadsAfter: 1 });
+        const result = await calibration.convertSet(null, 'calibration', [{ channel: 1, flux: 51 }], { device });
+        assert.equal(calls.writes.length, 1, 'the write itself still happened');
+        assert.equal(result.state.calibration_current[0].flux, 51, 'state falls back to what was written');
+        assert.match(result.state.calibration_status, /read-back failed/);
     },
 
     async 'calibration_current cannot be written'() {
